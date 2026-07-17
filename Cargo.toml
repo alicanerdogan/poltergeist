@@ -1,0 +1,34 @@
+[package]
+name = "ghosttbusterr"
+version = "0.1.0"
+edition = "2024"
+description = "Session manager for the Ghostty terminal"
+license = "MIT"
+
+[[bin]]
+name = "ghosttbusterr"
+path = "src/main.rs"
+
+[[bin]]
+name = "gtb"
+path = "src/bin/gtb.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+ulid = "1"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1"
+thiserror = "2"
+jiff = "0.2"
+which = "7"
+dirs = "6"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = true
+strip = true
+opt-level = 3
