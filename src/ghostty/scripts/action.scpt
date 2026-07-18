@@ -1,7 +1,7 @@
 -- Acts on existing surfaces, addressed by stable ids rebuilt via `whose`.
 -- argv:
 --   1: op            activate_app | perform_action | input_text | send_enter
---                    | activate_window | select_tab | close_tab
+--                    | activate_window | select_tab | close_tab | focus
 --   2: window/terminal id (op-dependent)
 --   3: tab id / action string / text (op-dependent)
 on run argv
@@ -26,6 +26,8 @@ on run argv
 		else if op is "close_tab" then
 			set w to first window whose id is (item 2 of argv)
 			close tab (first tab of w whose id is (item 3 of argv))
+		else if op is "focus" then
+			focus (first terminal whose id is (item 2 of argv))
 		else
 			error "unknown action op: " & op
 		end if

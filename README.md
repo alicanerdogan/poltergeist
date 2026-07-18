@@ -124,6 +124,7 @@ workflows:
       direction: vertical                  # side by side
       panels:
         - run: pi
+          active: true                  # focused after spin-up (at most one)
         - layout:
             direction: horizontal          # stacked
             panels:
@@ -136,9 +137,10 @@ invocation cwd) is checked first and shadows the global config on name
 conflict.
 
 **Layout** is a recursive tree: a `panels` item is either a leaf (`run`,
-optional `cwd` and `env: [KEY=VALUE]`) or a nested `layout`. Panel order
-expresses placement (first = left/top); Ghostty equalizes split sizes after
-creation.
+optional `cwd`, `env: [KEY=VALUE]`, and `active: true`) or a nested `layout`.
+Panel order expresses placement (first = left/top); Ghostty equalizes split sizes
+after creation. At most one panel per workflow may be `active: true`; it's
+focused after spin-up (default: the last-created split).
 
 **Params** are declared in the workflow and supplied by, in precedence order:
 `--param k=v` → environment variable `$k` → YAML default → error if

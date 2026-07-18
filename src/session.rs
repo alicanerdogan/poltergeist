@@ -48,6 +48,8 @@ pub enum Op {
     Equalize { pane: PaneRef },
     SetTitle { pane: PaneRef, title: String },
     TypeRun { pane: PaneRef, text: String },
+    /// Focus this pane last (after runs), so Ghostty ends with it active.
+    Focus { pane: PaneRef },
 }
 
 pub struct PlanCtx<'a> {
@@ -70,11 +72,16 @@ pub fn plan(ctx: &PlanCtx) -> Result<Vec<Op>> {
         PlannedWindow::Existing(id) => Op::NewTab { window_id: id.clone(), cfg: root_cfg },
     }];
     let mut runs = Vec::new();
+    let mut active: Option<PaneRef> = None;
     let mut counter = 0;
-    plan_node(ctx, ctx.layout, PaneRef::Root, &mut ops, &mut runs, &mut counter);
+    plan_node(ctx, ctx.layout, PaneRef::Root, &mut ops, &mut runs, &mut counter, &mut active);
     ops.push(Op::Equalize { pane: PaneRef::Root });
     ops.push(Op::SetTitle { pane: PaneRef::Root, title: ctx.title.to_string() });
     ops.extend(runs);
+    if let Some(pane) = active {
+        // Focus wins over the last-typed pane, so it must run last.
+        ops.push(Op::Focus { pane });
+    }
     Ok(ops)
 }
 
@@ -85,6 +92,7 @@ fn plan_node(
     ops: &mut Vec<Op>,
     runs: &mut Vec<Op>,
     counter: &mut usize,
+    active: &mut Option<PaneRef>,
 ) {
     let mut panes = vec![current];
     let mut prev = current;
@@ -101,8 +109,11 @@ fn plan_node(
                 if let Some(run) = &leaf.run {
                     runs.push(Op::TypeRun { pane, text: run.clone() });
                 }
+                if leaf.active {
+                    *active = Some(pane);
+                }
             }
-            Panel::Node(node) => plan_node(ctx, &node.layout, pane, ops, runs, counter),
+            Panel::Node(node) => plan_node(ctx, &node.layout, pane, ops, runs, counter, active),
         }
     }
 }
@@ -343,6 +354,10 @@ fn run_ops(
                 ghostty.input_text(id, text)?;
                 ghostty.send_enter(id)?;
             }
+            Op::Focus { pane } => {
+                let id = pane_id(panes, *pane)?;
+                ghostty.focus(id)?;
+            }
         }
     }
     Ok(())
@@ -372,6 +387,7 @@ fn interpolate_panel(panel: &Panel, params: &Params) -> Result<Panel> {
             run: l.run.as_deref().map(|r| params::interpolate(r, params)).transpose()?,
             cwd: l.cwd.as_deref().map(|c| params::interpolate(c, params)).transpose()?,
             env: l.env.iter().map(|e| params::interpolate(e, params)).collect::<Result<Vec<_>>>()?,
+            active: l.active,
         })),
         Panel::Node(n) => Ok(Panel::Node(PanelNode { layout: interpolate_layout(&n.layout, params)? })),
     }
@@ -492,6 +508,7 @@ mod tests {
                 Op::Equalize { .. } => "equalize".into(),
                 Op::SetTitle { .. } => "title".into(),
                 Op::TypeRun { pane, text } => format!("run {pane:?} {text}"),
+                Op::Focus { pane } => format!("focus {pane:?}"),
             })
             .collect();
         assert_eq!(
@@ -519,6 +536,41 @@ mod tests {
     }
 
     #[test]
+    fn active_pane_emits_focus_op_last() {
+        let layout = Layout {
+            direction: Direction::Vertical,
+            panels: vec![
+                leaf(Some("pi")),
+                Panel::Leaf(PanelLeaf {
+                    run: Some("lazygit".into()),
+                    cwd: None,
+                    env: Vec::new(),
+                    active: true,
+                }),
+            ],
+        };
+        let window = PlannedWindow::Existing("w1".into());
+        let ops = plan(&ctx(&window, &layout)).unwrap();
+        // Focus must run after every TypeRun so Ghostty ends on the active pane.
+        let last = ops.last().unwrap();
+        assert!(matches!(last, Op::Focus { pane: PaneRef::Child(0) }));
+        let run_idx = ops.iter().position(|o| matches!(o, Op::TypeRun { .. })).unwrap();
+        let focus_idx = ops.len() - 1;
+        assert!(run_idx < focus_idx);
+    }
+
+    #[test]
+    fn no_active_pane_emits_no_focus_op() {
+        let layout = Layout {
+            direction: Direction::Vertical,
+            panels: vec![leaf(Some("pi")), leaf(Some("lazygit"))],
+        };
+        let window = PlannedWindow::Existing("w1".into());
+        let ops = plan(&ctx(&window, &layout)).unwrap();
+        assert!(!ops.iter().any(|op| matches!(op, Op::Focus { .. })));
+    }
+
+    #[test]
     fn panel_cwd_and_env_reach_cfg() {
         let layout = Layout {
             direction: Direction::Horizontal,
@@ -528,6 +580,7 @@ mod tests {
                     run: Some("x".into()),
                     cwd: Some("/elsewhere".into()),
                     env: vec!["A=1".into()],
+                    active: false,
                 }),
             ],
         };

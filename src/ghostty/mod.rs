@@ -25,6 +25,7 @@ pub trait GhosttyBridge {
     fn activate_window(&self, window: &str) -> Result<()>;
     fn select_tab(&self, window: &str, tab: &str) -> Result<()>;
     fn close_tab(&self, window: &str, tab: &str) -> Result<()>;
+    fn focus(&self, terminal: &str) -> Result<()>;
 }
 
 /// Drives Ghostty through its AppleScript API. Scripts run as
@@ -136,6 +137,11 @@ impl GhosttyBridge for OsascriptBridge {
 
     fn close_tab(&self, window: &str, tab: &str) -> Result<()> {
         Self::run(scripts::ACTION, &["close_tab", window, tab])?;
+        Ok(())
+    }
+
+    fn focus(&self, terminal: &str) -> Result<()> {
+        Self::run(scripts::ACTION, &["focus", terminal])?;
         Ok(())
     }
 }
@@ -360,6 +366,11 @@ pub mod fake {
                 w.tabs.retain(|t| t.id != tab);
             }
             windows.retain(|w| !w.tabs.is_empty());
+            Ok(())
+        }
+
+        fn focus(&self, terminal: &str) -> Result<()> {
+            self.log.borrow_mut().push(format!("focus:{terminal}"));
             Ok(())
         }
     }

@@ -73,7 +73,8 @@ gtb up [workflow] [--name N] [--cwd DIR] [--direction vertical|horizontal]
 4. Reconcile the registry (§5.3), then check name uniqueness (§5.2).
 5. Create the tab and splits via AppleScript, equalize splits, set the tab title.
 6. Deliver each panel's `run` command (§5.5).
-7. Register the session in the registry; print the result.
+7. Focus the active panel, if any (§4.2 `active`).
+8. Register the session in the registry; print the result.
 
 ### 2.2 `gtb ls`
 
@@ -180,10 +181,12 @@ workflows:
 | `run` | Shell command typed into the pane's interactive shell (§5.5). Optional; omitted → plain shell. |
 | `cwd` | Panel working directory. Default: the session cwd. |
 | `env` | List of `KEY=VALUE` entries injected into that surface's environment. |
+| `active` | Boolean; mark one panel to be Ghostty-focused after spin-up. At most one per workflow; none → Ghostty's native focus (the last-created split). |
 
 Splits are created newest-pane-first per node, then Ghostty's `equalize_splits` action
 normalizes pane sizes. Panel *order* expresses placement (first = left/top); there are no
-`left`/`up` splits.
+`left`/`up` splits. The active panel (if any) is focused **last**, after run delivery, so it
+overrides the focus a `run` command may leave behind.
 
 ### 4.3 Params
 

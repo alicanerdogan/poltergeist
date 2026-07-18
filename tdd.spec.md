@@ -251,6 +251,7 @@ enum Op {
     SetTitle { title: String },                        // set_tab_title:<name>
     Equalize,                                          // equalize_splits
     TypeRun { pane: PaneRef, text: String },           // run delivery
+    Focus { pane: PaneRef },                           // focus terminal (active panel)
 }
 
 fn plan(wf: &ResolvedWorkflow, target: &WindowTarget) -> Vec<Op>
@@ -260,8 +261,9 @@ Layout tree → op list, recursive, newest-pane-first: for a node with panels
 `[p0, p1..pn]`, `p0` occupies the current pane; each subsequent panel splits the pane
 created just before it (`vertical` → Ghostty `right`, `horizontal` → `down`). Nested
 layouts recurse into their freshly split pane. `PaneRef` placeholders (`Root`, `Child(n)`)
-are resolved to real terminal IDs at execution. Sibling `SetTitle`/`Equalize`/`TypeRun`
-ops follow creation order: create all panes → equalize → set title → type runs.
+are resolved to real terminal IDs at execution. Sibling `SetTitle`/`Equalize`/`TypeRun`/`Focus`
+ops follow creation order: create all panes → equalize → set title → type runs → focus the
+active panel (if any). `Focus` runs last so it wins over the focus a `run` leaves behind.
 
 **Execute:** fold ops over the bridge, mapping `PaneRef` → returned terminal IDs, then
 `StateStore::register` in one tx, then print (table line or `--json` record).
@@ -341,6 +343,7 @@ trait GhosttyBridge {
     fn activate_window(&self, window: &str) -> Result<()>;
     fn select_tab(&self, window: &str, tab: &str) -> Result<()>;
     fn close_tab(&self, window: &str, tab: &str) -> Result<()>;
+    fn focus(&self, terminal: &str) -> Result<()>;            // active panel
 }
 ```
 
@@ -362,7 +365,8 @@ maps to the sdef record (`workingDirectory`, `environmentVariables`, `waitAfterC
   `front window`.
 - **`action.scpt`** — `perform action` (used for `set_tab_title:<name>` and
   `equalize_splits`), plus `input text` / `send key "enter"`, `activate window` /
-  `select tab` / `close tab`. Tab/terminal references are rebuilt per call from IDs:
+  `select tab` / `close tab` / `focus` (active panel). Tab/terminal references are rebuilt
+  per call from IDs:
   `first tab of first window whose id is …` — the sdef exposes stable IDs precisely so
   references survive across separate osascript invocations.
 

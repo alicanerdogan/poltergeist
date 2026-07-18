@@ -84,6 +84,11 @@ pub struct PanelLeaf {
     pub cwd: Option<String>,
     #[serde(default)]
     pub env: Vec<String>,
+    /// Mark this pane as the one Ghostty focuses after spin-up. At most one
+    /// active leaf per workflow (validated); none = Ghostty's native focus
+    /// (the last-created split).
+    #[serde(default)]
+    pub active: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -94,7 +99,7 @@ pub struct PanelNode {
 
 impl Panel {
     pub fn leaf(run: Option<String>) -> Panel {
-        Panel::Leaf(PanelLeaf { run, cwd: None, env: Vec::new() })
+        Panel::Leaf(PanelLeaf { run, cwd: None, env: Vec::new(), active: false })
     }
 }
 
@@ -122,6 +127,7 @@ pub fn find_workflow<'a>(
 
 fn validate(config: &Config) -> Result<()> {
     for (key, wf) in &config.workflows {
+        let mut active_count = 0;
         for leaf in leaves(wf) {
             for entry in &leaf.env {
                 if !entry.contains('=') {
@@ -130,6 +136,14 @@ fn validate(config: &Config) -> Result<()> {
                     )));
                 }
             }
+            if leaf.active {
+                active_count += 1;
+            }
+        }
+        if active_count > 1 {
+            return Err(Error::Config(format!(
+                "workflow '{key}': at most one panel may be `active` (found {active_count})"
+            )));
         }
         if let Some(layout) = &wf.layout {
             validate_layout(key, layout)?;
@@ -291,5 +305,29 @@ workflows:
             find_workflow("y", Some(&project), &global).unwrap().name.as_deref(),
             Some("global-y")
         );
+    }
+
+    #[test]
+    fn parses_active_panel() {
+        let cfg: Config = serde_yaml::from_str(
+            "workflows:\n  x:\n    layout:\n      direction: vertical\n      panels:\n        - run: pi\n          active: true\n        - run: lazygit\n",
+        )
+        .unwrap();
+        let layout = cfg.workflows["x"].layout.as_ref().unwrap();
+        match &layout.panels[0] {
+            Panel::Leaf(l) => assert!(l.active),
+            other => panic!("expected leaf, got {other:?}"),
+        }
+        match &layout.panels[1] {
+            Panel::Leaf(l) => assert!(!l.active),
+            other => panic!("expected leaf, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn multiple_active_panels_is_config_error() {
+        let yaml = "workflows:\n  x:\n    layout:\n      direction: vertical\n      panels:\n        - run: pi\n          active: true\n        - run: vim\n          active: true\n";
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(matches!(validate(&cfg), Err(Error::Config(_))));
     }
 }
