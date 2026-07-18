@@ -198,8 +198,9 @@ this precedence:
   `env` values, and hook commands.
 - Two implicit params always exist without declaration: `${cwd}` (invocation directory) and
   `${session}` (resolved session name).
-- Undeclared params are an error (typo safety), except keys emitted by the pre-hook (§4.4),
-  which enter the param set dynamically.
+- Undeclared params warn (typo safety without aborting) and are dropped from the
+  resolved set, except keys emitted by the pre-hook (§4.4), which enter the param set
+  dynamically.
 - Declared params make workflows self-documenting; help output can list what a workflow
   accepts.
 

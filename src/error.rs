@@ -10,8 +10,6 @@ pub enum Error {
     WorkflowNotFound(String),
     #[error("missing required param '{0}'")]
     MissingParam(String),
-    #[error("undeclared param '{0}'")]
-    UndeclaredParam(String),
     #[error("unresolved variable '${{{0}}}'")]
     UnresolvedVar(String),
     #[error("hook failed (exit {code})")]

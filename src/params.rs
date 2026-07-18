@@ -39,19 +39,30 @@ impl Params {
 
 /// Resolve declared params with spec precedence: flag > environment > YAML
 /// default > error if required. `env` is a lookup fn so tests stay pure.
+///
+/// Undeclared params do not abort: they are returned as warnings (typo-prone
+/// but harmless to ignore) and dropped from the resolved set. The caller is
+/// responsible for surfacing them to the user.
 pub fn resolve(
     decls: &BTreeMap<String, ParamDecl>,
     cli_params: &[(String, String)],
     env: &dyn Fn(&str) -> Option<String>,
-) -> Result<Params> {
-    for (key, _) in cli_params {
-        if !decls.contains_key(key) {
-            return Err(Error::UndeclaredParam(key.clone()));
-        }
-    }
+) -> Result<(Params, Vec<String>)> {
+    let mut warnings: Vec<String> = Vec::new();
+    let declared_flags: Vec<&(String, String)> = cli_params
+        .iter()
+        .filter(|(key, _)| {
+            let known = decls.contains_key(key);
+            if !known {
+                warnings.push(key.clone());
+            }
+            known
+        })
+        .collect();
+
     let mut out = Params::default();
     for (name, decl) in decls {
-        let value = cli_params
+        let value = declared_flags
             .iter()
             .rev()
             .find(|(k, _)| k == name)
@@ -64,7 +75,7 @@ pub fn resolve(
             None => {}
         }
     }
-    Ok(out)
+    Ok((out, warnings))
 }
 
 /// Interpolate `${name}` references (spec §4.3). `$${` is an escaped literal
@@ -123,12 +134,12 @@ mod tests {
     fn flag_beats_env_beats_default() {
         let cli = vec![("branch".to_string(), "feat/login".to_string())];
         let env = |k: &str| (k == "base").then(|| "develop".to_string());
-        let p = resolve(&decls(), &cli, &env).unwrap();
+        let (p, _) = resolve(&decls(), &cli, &env).unwrap();
         assert_eq!(p.get("branch"), Some("feat/login"));
         assert_eq!(p.get("base"), Some("develop")); // env beats default
         assert_eq!(p.get("opt"), None); // optional, unset: absent
 
-        let p = resolve(&decls(), &cli, &no_env).unwrap();
+        let (p, _) = resolve(&decls(), &cli, &no_env).unwrap();
         assert_eq!(p.get("base"), Some("main")); // default
     }
 
@@ -138,7 +149,7 @@ mod tests {
             ("branch".to_string(), "a".to_string()),
             ("branch".to_string(), "b".to_string()),
         ];
-        let p = resolve(&decls(), &cli, &no_env).unwrap();
+        let (p, _) = resolve(&decls(), &cli, &no_env).unwrap();
         assert_eq!(p.get("branch"), Some("b"));
     }
 
@@ -149,10 +160,15 @@ mod tests {
     }
 
     #[test]
-    fn undeclared_flag_errors() {
-        let cli = vec![("brnach".to_string(), "typo".to_string())];
-        let err = resolve(&decls(), &cli, &no_env).unwrap_err();
-        assert!(matches!(err, Error::UndeclaredParam(n) if n == "brnach"));
+    fn undeclared_flag_warns_and_is_dropped() {
+        let cli = vec![
+            ("branch".to_string(), "feat".to_string()),
+            ("brnach".to_string(), "typo".to_string()),
+        ];
+        let (p, warnings) = resolve(&decls(), &cli, &no_env).unwrap();
+        assert_eq!(p.get("branch"), Some("feat"));
+        // undeclared key is reported, not set, and does not abort resolution.
+        assert_eq!(warnings, vec!["brnach".to_string()]);
     }
 
     #[test]

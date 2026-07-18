@@ -142,8 +142,12 @@ pub fn up(req: &UpRequest, store: &StateStore, ghostty: &dyn GhosttyBridge) -> R
     };
 
     // 1. Resolve params; error on missing required. ${cwd} is implicit.
+    //    Undeclared params warn (typo-prone but harmless) and are dropped.
     let decls = workflow.as_ref().map(|w| w.params.clone()).unwrap_or_default();
-    let mut params = params::resolve(&decls, &req.params, &|k| std::env::var(k).ok())?;
+    let (mut params, undeclared) = params::resolve(&decls, &req.params, &|k| std::env::var(k).ok())?;
+    for key in &undeclared {
+        eprintln!("warning: ignoring undeclared param '{key}'");
+    }
     let invocation_cwd = req.invocation_cwd.to_string_lossy().into_owned();
     params.set("cwd", invocation_cwd.clone());
 
