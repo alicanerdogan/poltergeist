@@ -2,8 +2,14 @@
 name = "poltergeist"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
 description = "Session manager for the Ghostty terminal"
 license = "MIT"
+repository = "https://github.com/alicanerdogan/poltergeist"
+readme = "README.md"
+keywords = ["ghostty", "terminal", "session", "workflow", "applescript"]
+categories = ["command-line-utilities", "os::macos-apis"]
+exclude = [".pi/", "spec.md", "tdd.spec.md"]
 
 [[bin]]
 name = "poltergeist"
