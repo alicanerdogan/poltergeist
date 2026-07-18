@@ -10,9 +10,9 @@ use crate::{config, output, picker, reconcile, resolve, session};
 
 #[derive(Parser)]
 #[command(
-    name = "gtb",
+    name = "geist",
     version,
-    about = "ghosttbusterr — session manager for the Ghostty terminal"
+    about = "poltergeist — session manager for the Ghostty terminal"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -114,7 +114,7 @@ pub fn run() -> i32 {
 
 fn dispatch(cli: Cli) -> Result<()> {
     let invocation_cwd = std::env::current_dir()?;
-    let home = config::gtb_home()?;
+    let home = config::home()?;
     let store = StateStore::open(&home.join(config::STATE_NAME))?;
     let bridge = OsascriptBridge::new();
     match cli.cmd {
@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn parses_up_adhoc() {
-        let cli = Cli::try_parse_from(["gtb", "up", "--", "vim", "lazygit"]).unwrap();
+        let cli = Cli::try_parse_from(["geist", "up", "--", "vim", "lazygit"]).unwrap();
         match cli.cmd {
             Cmd::Up(args) => {
                 assert_eq!(args.workflow, None);
@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn parses_up_workflow_with_flags() {
         let cli = Cli::try_parse_from([
-            "gtb", "up", "review",
+            "geist", "up", "review",
             "--param", "branch=feat",
             "--label", "role=review",
             "--window", "new",
@@ -246,23 +246,23 @@ mod tests {
 
     #[test]
     fn bad_kv_is_usage_error() {
-        assert!(Cli::try_parse_from(["gtb", "up", "--param", "noequals"]).is_err());
-        assert!(Cli::try_parse_from(["gtb", "ls", "--label", "=v"]).is_err());
+        assert!(Cli::try_parse_from(["geist", "up", "--param", "noequals"]).is_err());
+        assert!(Cli::try_parse_from(["geist", "ls", "--label", "=v"]).is_err());
     }
 
     #[test]
     fn direction_value_enum() {
-        let cli = Cli::try_parse_from(["gtb", "up", "--direction", "horizontal", "--", "top"]).unwrap();
+        let cli = Cli::try_parse_from(["geist", "up", "--direction", "horizontal", "--", "top"]).unwrap();
         match cli.cmd {
             Cmd::Up(args) => assert_eq!(args.direction, Some(Direction::Horizontal)),
             _ => panic!("expected up"),
         }
-        assert!(Cli::try_parse_from(["gtb", "up", "--direction", "sideways"]).is_err());
+        assert!(Cli::try_parse_from(["geist", "up", "--direction", "sideways"]).is_err());
     }
 
     #[test]
     fn workflow_and_commands_together_is_rejected() {
-        let cli = Cli::try_parse_from(["gtb", "up", "review", "--", "vim"]).unwrap();
+        let cli = Cli::try_parse_from(["geist", "up", "review", "--", "vim"]).unwrap();
         let Cmd::Up(args) = cli.cmd else { panic!("expected up") };
         let dir = tempfile::tempdir().unwrap();
         let store = StateStore::open_memory().unwrap();

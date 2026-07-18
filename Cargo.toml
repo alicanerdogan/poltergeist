@@ -1,17 +1,17 @@
 [package]
-name = "ghosttbusterr"
+name = "poltergeist"
 version = "0.1.0"
 edition = "2024"
 description = "Session manager for the Ghostty terminal"
 license = "MIT"
 
 [[bin]]
-name = "ghosttbusterr"
+name = "poltergeist"
 path = "src/main.rs"
 
 [[bin]]
-name = "gtb"
-path = "src/bin/gtb.rs"
+name = "geist"
+path = "src/bin/geist.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

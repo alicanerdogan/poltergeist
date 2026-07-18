@@ -422,7 +422,7 @@ mod tests {
     #[test]
     fn file_backed_open_in_tempdir() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("gtb").join("state");
+        let path = dir.path().join("geist").join("state");
         {
             let s = StateStore::open(&path).unwrap();
             let labels = BTreeMap::new();

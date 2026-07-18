@@ -7,18 +7,18 @@ use crate::error::{Error, Result};
 use crate::ghostty::types::{Direction, WindowTarget};
 use crate::params::ParamDecl;
 
-pub const PROJECT_CONFIG_NAME: &str = ".ghosttbusterr.yml";
+pub const PROJECT_CONFIG_NAME: &str = ".poltergeist.yml";
 pub const GLOBAL_CONFIG_NAME: &str = "config.yml";
 pub const STATE_NAME: &str = "state";
 
-/// `~/.config/ghosttbusterr` (spec §4.1 — explicitly *not* the macOS
-/// `dirs::config_dir()`). `GTB_HOME` replaces the whole directory.
-pub fn gtb_home() -> Result<PathBuf> {
-    if let Some(p) = std::env::var_os("GTB_HOME") {
+/// `~/.config/poltergeist` (spec §4.1 — explicitly *not* the macOS
+/// `dirs::config_dir()`). `GEIST_HOME` replaces the whole directory.
+pub fn home() -> Result<PathBuf> {
+    if let Some(p) = std::env::var_os("GEIST_HOME") {
         return Ok(PathBuf::from(p));
     }
     let home = dirs::home_dir().ok_or_else(|| Error::Config("could not determine home directory".into()))?;
-    Ok(home.join(".config").join("ghosttbusterr"))
+    Ok(home.join(".config").join("poltergeist"))
 }
 
 /// Project-local config discovered by walking up from `start` (like git).
@@ -243,8 +243,8 @@ workflows:
         let dir = tempfile::tempdir().unwrap();
         let nested = dir.path().join("a/b/c");
         std::fs::create_dir_all(&nested).unwrap();
-        std::fs::write(dir.path().join("a/.ghosttbusterr.yml"), "workflows: {}").unwrap();
-        assert_eq!(discover(&nested), Some(dir.path().join("a/.ghosttbusterr.yml")));
+        std::fs::write(dir.path().join("a/.poltergeist.yml"), "workflows: {}").unwrap();
+        assert_eq!(discover(&nested), Some(dir.path().join("a/.poltergeist.yml")));
         assert_eq!(discover(dir.path()), None);
     }
 

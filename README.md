@@ -1,10 +1,11 @@
-# ghosttbusterr
+# poltergeist
 
 A session manager for the [Ghostty](https://ghostty.org) terminal on macOS.
 
-`gtb` turns declarative *workflows* into live Ghostty state — tabs, split
-panes, running commands, titles — and keeps a registry of everything it
-created, so sessions can be listed, switched to, and killed.
+A poltergeist is a ghost that moves objects around — this one moves windows
+and panes. `geist` turns declarative *workflows* into live Ghostty state —
+tabs, split panes, running commands, titles — and keeps a registry of
+everything it created, so sessions can be listed, switched to, and killed.
 
 ## Install
 
@@ -12,31 +13,31 @@ created, so sessions can be listed, switched to, and killed.
 cargo install --path .
 ```
 
-This installs two equivalent binaries: `ghosttbusterr` and the short alias
-`gtb`. Examples below use `gtb`.
+This installs two equivalent binaries: `poltergeist` and the short alias
+`geist`. Examples below use `geist`.
 
-> **First run:** the first time `gtb` drives Ghostty, macOS shows an
+> **First run:** the first time `geist` drives Ghostty, macOS shows an
 > Automation consent dialog for the host application (your terminal, agent,
-> etc.). That's a one-time OS prompt per host — approve it once and `gtb`
+> etc.). That's a one-time OS prompt per host — approve it once and `geist`
 > works unattended from then on.
 
 ## Commands
 
-### `gtb up` — spin up a session
+### `geist up` — spin up a session
 
 Ad-hoc, straight from flags — one panel per command after `--`:
 
 ```sh
-gtb up --name dev -- vim . lazygit          # two panes, side by side
-gtb up --direction horizontal -- top htop   # stacked instead
-gtb up                                      # a single plain shell pane
+geist up --name dev -- vim . lazygit          # two panes, side by side
+geist up --direction horizontal -- top htop   # stacked instead
+geist up                                      # a single plain shell pane
 ```
 
 Or from a named workflow defined in a config file (see
 [Workflows](#workflows)):
 
 ```sh
-gtb up review --param branch=feat/login
+geist up review --param branch=feat/login
 ```
 
 Combining a workflow with `--` commands is an error. Commands are *typed into
@@ -49,7 +50,7 @@ shell — the pane survives.
 | `--cwd DIR` | Working directory inherited by all panels. Default: invocation cwd. |
 | `--direction vertical\|horizontal` | Split order for ad-hoc panels. `vertical` = side by side (like `:vsplit`), `horizontal` = stacked (like `:split`). Default `vertical`. |
 | `--label k=v` | Attach a label (queryable metadata). Repeatable; overrides workflow labels on key conflict. |
-| `--window TARGET` | `front` (default), `new`, or a Ghostty window ID (from `gtb ls --json`). |
+| `--window TARGET` | `front` (default), `new`, or a Ghostty window ID (from `geist ls --json`). |
 | `--pre CMD` | Pre-spin-up hook, same contract as workflow hooks (below). |
 | `--param k=v` | Supply a workflow param. Repeatable; workflow mode only. |
 | `--json` | Print the created session's full record as JSON. |
@@ -57,12 +58,12 @@ shell — the pane survives.
 Spin-up is all-or-nothing: params, hooks, and `${var}` interpolation are
 resolved *before* any Ghostty mutation, and a failure rolls the tab back.
 
-### `gtb ls` — list sessions
+### `geist ls` — list sessions
 
 ```sh
-gtb ls
-gtb ls --label role=review --label branch=feat/login   # AND semantics
-gtb ls --json                                          # full records for machines
+geist ls
+geist ls --label role=review --label branch=feat/login   # AND semantics
+geist ls --json                                          # full records for machines
 ```
 
 ```
@@ -74,22 +75,22 @@ gtb ls --json                                          # full records for machin
 `→` marks the session whose tab is currently selected in Ghostty. Human
 tables are for humans; scripts should always use `--json`.
 
-### `gtb switch` — focus a session
+### `geist switch` — focus a session
 
 ```sh
-gtb switch review-feat-login
-gtb switch rev          # unambiguous prefixes work
-gtb switch              # interactive picker
+geist switch review-feat-login
+geist switch rev          # unambiguous prefixes work
+geist switch              # interactive picker
 ```
 
 Names resolve exact → unique prefix → error listing candidates. With no
 argument: `fzf` if it's on PATH, else a numbered list — but only on a TTY.
 From scripts (non-TTY stdout) the picker never fires; pass a name.
 
-### `gtb kill` — close a session
+### `geist kill` — close a session
 
 ```sh
-gtb kill review-feat-login
+geist kill review-feat-login
 ```
 
 Closes the session's tab and removes it from the registry. Same name
@@ -99,7 +100,7 @@ resolution as `switch`; no confirmation prompt (prompts break scriptability).
 
 - `0` success · `1` runtime error · `2` usage error
 - Errors and cleanup notices (`cleared N closed session(s)`) go to stderr.
-- When stdout is not a TTY, `gtb` is fully non-interactive: no pickers, no
+- When stdout is not a TTY, `geist` is fully non-interactive: no pickers, no
   prompts.
 
 ## Workflows
@@ -107,7 +108,7 @@ resolution as `switch`; no confirmation prompt (prompts break scriptability).
 A workflow is a named, parameterized, declarative session description:
 
 ```yaml
-# .ghosttbusterr.yml (project) or ~/.config/ghosttbusterr/config.yml (global)
+# .poltergeist.yml (project) or ~/.config/poltergeist/config.yml (global)
 workflows:
   review:
     name: "review-${branch}"              # session name (interpolated)
@@ -130,7 +131,7 @@ workflows:
               - run: lazygit
 ```
 
-Project config (`.ghosttbusterr.yml`, discovered by walking up from the
+Project config (`.poltergeist.yml`, discovered by walking up from the
 invocation cwd) is checked first and shadows the global config on name
 conflict.
 
@@ -158,26 +159,26 @@ git worktree add ".wt/$1" -b "$1" "$2" >&2
 echo "worktree=$PWD/.wt/$1"
 ```
 
-**In-pane awareness:** every panel gets `GTB_SESSION=<session-name>` in its
+**In-pane awareness:** every panel gets `GEIST_SESSION=<session-name>` in its
 environment, so anything running inside a managed pane can discover its
-session and compose further `gtb` calls.
+session and compose further `geist` calls.
 
 ## How it works (briefly)
 
 - Single static Rust binary, no runtime dependencies.
 - All Ghostty manipulation goes through Ghostty's AppleScript API via
   `osascript` — no private interfaces.
-- State lives in a SQLite registry at `~/.config/ghosttbusterr/state`
-  (override the whole directory with `GTB_HOME`). **Ghostty is the source of
-  truth**; the registry is a cache of claims reconciled against live Ghostty
-  state on every command — closing a tab by hand is automatically consistent
-  by the next `gtb` invocation. There is no daemon.
+- State lives in a SQLite registry at `~/.config/poltergeist/state`
+  (override the whole directory with `GEIST_HOME`). **Ghostty is the source
+  of truth**; the registry is a cache of claims reconciled against live
+  Ghostty state on every command — closing a tab by hand is automatically
+  consistent by the next `geist` invocation. There is no daemon.
 
 ## Development
 
 ```sh
-cargo test                 # unit + fake-bridge tests
-GTB_INTEGRATION=1 cargo test --test live -- --ignored   # against a live Ghostty
+cargo test                   # unit + fake-bridge tests
+GEIST_INTEGRATION=1 cargo test --test live -- --ignored   # against a live Ghostty
 ```
 
 See `spec.md` for the behavior contract and `tdd.spec.md` for the

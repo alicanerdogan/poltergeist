@@ -37,7 +37,7 @@ fn to_json(row: &SessionRow, selected: Option<bool>) -> Result<SessionJson<'_>> 
     })
 }
 
-/// `gtb up` result: the created session's full record with `--json`
+/// `geist up` result: the created session's full record with `--json`
 /// (spec §6.2 — `selected` omitted), else a one-line confirmation.
 pub fn print_up(row: &SessionRow, json: bool) -> Result<()> {
     if json {
@@ -49,7 +49,7 @@ pub fn print_up(row: &SessionRow, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// `gtb ls`: human table, or complete records with `--json` (spec §6.1).
+/// `geist ls`: human table, or complete records with `--json` (spec §6.1).
 /// `selected_tab` is the front window's selected tab (drives `→`/`selected`).
 pub fn print_ls(sessions: &[SessionRow], selected_tab: Option<&str>, json: bool) -> Result<()> {
     if json {
@@ -61,7 +61,7 @@ pub fn print_ls(sessions: &[SessionRow], selected_tab: Option<&str>, json: bool)
         return Ok(());
     }
     if sessions.is_empty() {
-        println!("no managed sessions — gtb up <workflow>");
+        println!("no managed sessions — geist up <workflow>");
         return Ok(());
     }
 

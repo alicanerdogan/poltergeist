@@ -9,7 +9,7 @@ use crate::params::{self, Params};
 use crate::state::{NewSession, SessionRow, StateStore};
 use crate::{hooks, reconcile};
 
-/// Everything `gtb up` knows at invocation time (flags already parsed).
+/// Everything `geist up` knows at invocation time (flags already parsed).
 pub struct UpRequest {
     pub workflow: Option<String>,
     pub name: Option<String>,
@@ -21,7 +21,7 @@ pub struct UpRequest {
     pub params: Vec<(String, String)>,
     pub commands: Vec<String>,
     pub invocation_cwd: PathBuf,
-    /// ghosttbusterr home (global config + state dir); `GTB_HOME`-aware.
+    /// poltergeist home (global config + state dir); `GEIST_HOME`-aware.
     pub home: PathBuf,
 }
 
@@ -119,12 +119,12 @@ fn first_cfg(panel: &Panel, ctx: &PlanCtx) -> SurfaceCfg {
 fn leaf_cfg(leaf: &PanelLeaf, ctx: &PlanCtx) -> SurfaceCfg {
     let cwd = leaf.cwd.clone().unwrap_or_else(|| ctx.session_cwd.to_string());
     let mut env = leaf.env.clone();
-    env.push(format!("GTB_SESSION={}", ctx.session_name));
+    env.push(format!("GEIST_SESSION={}", ctx.session_name));
     SurfaceCfg { cwd: Some(cwd), env }
 }
 
 // ---------------------------------------------------------------------------
-// `gtb up` orchestration (spec §2.1 lifecycle: all-or-nothing)
+// `geist up` orchestration (spec §2.1 lifecycle: all-or-nothing)
 // ---------------------------------------------------------------------------
 
 pub fn up(req: &UpRequest, store: &StateStore, ghostty: &dyn GhosttyBridge) -> Result<SessionRow> {
@@ -450,7 +450,7 @@ mod tests {
         let ops = plan(&ctx(&window, &layout)).unwrap();
         let cfg = || SurfaceCfg {
             cwd: Some("/cwd".into()),
-            env: vec!["GTB_SESSION=s".into()],
+            env: vec!["GEIST_SESSION=s".into()],
         };
         assert_eq!(
             ops,
@@ -533,7 +533,7 @@ mod tests {
             Op::Split { dir, cfg, .. } => {
                 assert_eq!(*dir, Direction::Horizontal);
                 assert_eq!(cfg.cwd.as_deref(), Some("/elsewhere"));
-                assert_eq!(cfg.env, vec!["A=1".to_string(), "GTB_SESSION=s".to_string()]);
+                assert_eq!(cfg.env, vec!["A=1".to_string(), "GEIST_SESSION=s".to_string()]);
             }
             other => panic!("expected split, got {other:?}"),
         }
@@ -578,7 +578,7 @@ mod tests {
             params: vec![],
             commands: vec![],
             invocation_cwd: dir.to_path_buf(),
-            home: dir.join("gtbhome"),
+            home: dir.join("geist-home"),
         }
     }
 
@@ -594,9 +594,9 @@ mod tests {
         assert_eq!(row.name, dir.path().file_name().unwrap().to_string_lossy());
         assert_eq!(row.terminals.len(), 2);
         assert_eq!(row.cwd.as_deref(), Some(dir.path().to_string_lossy().as_ref()));
-        // every pane got GTB_SESSION injected
+        // every pane got GEIST_SESSION injected
         for (_, cfg) in bridge.cfgs.borrow().iter() {
-            assert!(cfg.env.iter().any(|e| e == &format!("GTB_SESSION={}", row.name)));
+            assert!(cfg.env.iter().any(|e| e == &format!("GEIST_SESSION={}", row.name)));
         }
         // same name again -> NameTaken
         let err = up(&req(dir.path()), &store, &bridge).unwrap_err();

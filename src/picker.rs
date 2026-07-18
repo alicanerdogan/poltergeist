@@ -4,11 +4,11 @@ use std::process::{Command, Stdio};
 use crate::error::{Error, Result};
 use crate::state::SessionRow;
 
-/// Interactive session picker for bare `gtb switch` (spec §2.3). Never fires
+/// Interactive session picker for bare `geist switch` (spec §2.3). Never fires
 /// from scripts or agents: non-TTY stdout is an error.
 pub fn pick(sessions: &[SessionRow]) -> Result<String> {
     if sessions.is_empty() {
-        return Err(Error::Message("no managed sessions — gtb up <workflow>".into()));
+        return Err(Error::Message("no managed sessions — geist up <workflow>".into()));
     }
     if !std::io::stdout().is_terminal() {
         return Err(Error::Usage("pass a session name".into()));

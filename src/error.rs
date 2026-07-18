@@ -20,7 +20,7 @@ pub enum Error {
     SessionNotFound(String),
     #[error("ambiguous session '{name}': matches {}", candidates.join(", "))]
     Ambiguous { name: String, candidates: Vec<String> },
-    #[error("session name '{0}' already in use (kill it with `gtb kill {0}` or pick another with --name)")]
+    #[error("session name '{0}' already in use (kill it with `geist kill {0}` or pick another with --name)")]
     NameTaken(String),
     #[error("ghostty: {0}")]
     Ghostty(String),
