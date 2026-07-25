@@ -185,14 +185,19 @@ impl Snapshot {
         self.windows.iter().any(|w| w.id == window_id)
     }
 
-    /// The selected tab of the front window — the single tab Ghostty considers
-    /// current. Drives the `→` marker and the `selected` JSON field.
-    pub fn selected_tab_id(&self) -> Option<&str> {
+    /// The selected tab of the front window — the single tab Ghostty
+    /// considers current (`adopt` targets it).
+    pub fn selected_tab(&self) -> Option<&TabInfo> {
         self.windows
             .iter()
             .find(|w| w.front)
             .and_then(|w| w.tabs.iter().find(|t| t.selected))
-            .map(|t| t.id.as_str())
+    }
+
+    /// Id of [`selected_tab`]. Drives the `→` marker and the `selected`
+    /// JSON field.
+    pub fn selected_tab_id(&self) -> Option<&str> {
+        self.selected_tab().map(|t| t.id.as_str())
     }
 }
 

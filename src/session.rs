@@ -37,6 +37,9 @@ pub enum PaneRef {
 pub enum PlannedWindow {
     New,
     Existing(String),
+    /// `adopt`: the current tab becomes the session; its existing terminal
+    /// is the root pane. No window/tab is created.
+    Adopted { window_id: String, tab_id: String, terminal_id: String },
 }
 
 /// Operations folded over the bridge in order (TDD §3.10).
@@ -44,6 +47,8 @@ pub enum PlannedWindow {
 pub enum Op {
     NewWindow { cfg: SurfaceCfg },
     NewTab { window_id: String, cfg: SurfaceCfg },
+    /// Seed the root pane with an existing terminal (adopt); creates nothing.
+    Adopt { window_id: String, tab_id: String, terminal_id: String },
     Split { target: PaneRef, dir: Direction, cfg: SurfaceCfg, into: PaneRef },
     Equalize { pane: PaneRef },
     SetTitle { pane: PaneRef, title: String },
@@ -66,10 +71,17 @@ pub struct PlanCtx<'a> {
 /// current pane and each subsequent panel splits the pane created just before
 /// it. Creation ops come first, then equalize, title, and run delivery.
 pub fn plan(ctx: &PlanCtx) -> Result<Vec<Op>> {
-    let root_cfg = first_cfg(&ctx.layout.panels[0], ctx);
     let mut ops = vec![match ctx.window {
-        PlannedWindow::New => Op::NewWindow { cfg: root_cfg },
-        PlannedWindow::Existing(id) => Op::NewTab { window_id: id.clone(), cfg: root_cfg },
+        PlannedWindow::New => Op::NewWindow { cfg: first_cfg(&ctx.layout.panels[0], ctx) },
+        PlannedWindow::Existing(id) => Op::NewTab {
+            window_id: id.clone(),
+            cfg: first_cfg(&ctx.layout.panels[0], ctx),
+        },
+        PlannedWindow::Adopted { window_id, tab_id, terminal_id } => Op::Adopt {
+            window_id: window_id.clone(),
+            tab_id: tab_id.clone(),
+            terminal_id: terminal_id.clone(),
+        },
     }];
     let mut runs = Vec::new();
     let mut active: Option<PaneRef> = None;
@@ -138,7 +150,21 @@ fn leaf_cfg(leaf: &PanelLeaf, ctx: &PlanCtx) -> SurfaceCfg {
 // `geist up` orchestration (spec §2.1 lifecycle: all-or-nothing)
 // ---------------------------------------------------------------------------
 
-pub fn up(req: &UpRequest, store: &StateStore, ghostty: &dyn GhosttyBridge) -> Result<SessionRow> {
+/// Everything resolved and validated before Ghostty is touched (steps 1–5
+/// of the spin lifecycle) — shared by `up` and `adopt`.
+struct Spin {
+    /// Workflow key, when spun from a workflow.
+    workflow: Option<String>,
+    name: String,
+    params: Params,
+    labels: BTreeMap<String, String>,
+    session_cwd: String,
+    layout: Layout,
+    /// Workflow-declared window placement (the `--window` flag wins).
+    window: Option<WindowTarget>,
+}
+
+fn resolve_spin(req: &UpRequest, store: &StateStore, ghostty: &dyn GhosttyBridge) -> Result<Spin> {
     // Config discovery: project-local walking up from the invocation cwd,
     // then global; project shadows global (spec §4.1).
     let project = config::discover(&req.invocation_cwd).map(|p| config::load(&p)).transpose()?;
@@ -228,15 +254,45 @@ pub fn up(req: &UpRequest, store: &StateStore, ghostty: &dyn GhosttyBridge) -> R
         return Err(Error::NameTaken(name));
     }
 
+    Ok(Spin {
+        workflow: req.workflow.clone(),
+        name,
+        params,
+        labels,
+        session_cwd,
+        layout,
+        window: workflow.and_then(|w| w.window),
+    })
+}
+
+/// Insert the record and read it back (steps 7–8). Rollback on failure is
+/// the caller's call — `up` closes the tab it created, `adopt` never
+/// touches the user's own tab.
+fn register_session(spin: &Spin, created: &Created, store: &StateStore) -> Result<SessionRow> {
+    let params_json = serde_json::to_string(&spin.params.0)?;
+    store.register(&NewSession {
+        name: &spin.name,
+        window_id: &created.window_id,
+        tab_id: &created.tab_id,
+        workflow: spin.workflow.as_deref(),
+        cwd: Some(&spin.session_cwd),
+        params: &params_json,
+        terminals: &created.terminals,
+        labels: &spin.labels,
+    })?;
+    store
+        .find_exact(&spin.name)?
+        .ok_or_else(|| Error::Message(format!("session '{}' vanished after registration", spin.name)))
+}
+
+pub fn up(req: &UpRequest, store: &StateStore, ghostty: &dyn GhosttyBridge) -> Result<SessionRow> {
+    let spin = resolve_spin(req, store, ghostty)?;
+
     // 6. Create the tab and splits, equalize, set the tab title.
     if !ghostty.is_running()? {
         ghostty.launch()?;
     }
-    let window_target = req
-        .window
-        .clone()
-        .or_else(|| workflow.as_ref().and_then(|w| w.window.clone()))
-        .unwrap_or(WindowTarget::Front);
+    let window_target = req.window.clone().or(spin.window.clone()).unwrap_or(WindowTarget::Front);
     let planned_window = match window_target {
         WindowTarget::New => PlannedWindow::New,
         WindowTarget::Front => match ghostty.front_window_id()? {
@@ -255,34 +311,70 @@ pub fn up(req: &UpRequest, store: &StateStore, ghostty: &dyn GhosttyBridge) -> R
 
     let ctx = PlanCtx {
         window: &planned_window,
-        layout: &layout,
-        title: &name,
-        session_cwd: &session_cwd,
-        session_name: &name,
+        layout: &spin.layout,
+        title: &spin.name,
+        session_cwd: &spin.session_cwd,
+        session_name: &spin.name,
     };
     let ops = plan(&ctx)?;
     let created = execute(&ops, ghostty)?;
 
-    // 7. Register (one tx); on failure — e.g. a name race — roll the tab back.
-    let params_json = serde_json::to_string(&params.0)?;
-    if let Err(e) = store.register(&NewSession {
-        name: &name,
-        window_id: &created.window_id,
-        tab_id: &created.tab_id,
-        workflow: req.workflow.as_deref(),
-        cwd: Some(&session_cwd),
-        params: &params_json,
-        terminals: &created.terminals,
-        labels: &labels,
-    }) {
-        let _ = ghostty.close_tab(&created.window_id, &created.tab_id);
-        return Err(e);
+    // 7./8. Register (one tx); on failure — e.g. a name race — roll the tab back.
+    match register_session(&spin, &created, store) {
+        Ok(row) => Ok(row),
+        Err(e) => {
+            let _ = ghostty.close_tab(&created.window_id, &created.tab_id);
+            Err(e)
+        }
+    }
+}
+
+/// `geist adopt`: like `up`, but the selected tab of the front window
+/// becomes the session's tab instead of creating a new one. Its single
+/// existing terminal is the root pane — the first panel's `run` is typed
+/// into it, the remaining panels split off of it. The root shell keeps its
+/// own cwd and environment (no `GEIST_SESSION` there).
+pub fn adopt(req: &UpRequest, store: &StateStore, ghostty: &dyn GhosttyBridge) -> Result<SessionRow> {
+    if !ghostty.is_running()? {
+        return Err(Error::Ghostty("Ghostty is not running — no tab to adopt".into()));
+    }
+    let snapshot = ghostty.snapshot()?;
+    let tab = snapshot
+        .selected_tab()
+        .ok_or_else(|| Error::Ghostty("no current tab — focus a Ghostty window first".into()))?
+        .clone();
+    if tab.terminals.len() != 1 {
+        return Err(Error::Message(format!(
+            "current tab has {} panes — adopt expects a single-pane tab",
+            tab.terminals.len()
+        )));
     }
 
-    // 8. Read the registered record back for output.
-    store
-        .find_exact(&name)?
-        .ok_or_else(|| Error::Message(format!("session '{name}' vanished after registration")))
+    let spin = resolve_spin(req, store, ghostty)?;
+    if let Some(owner) = store.live_sessions()?.into_iter().find(|s| s.tab_id == tab.id) {
+        return Err(Error::Message(format!(
+            "current tab is already managed by session '{}'",
+            owner.name
+        )));
+    }
+
+    let planned_window = PlannedWindow::Adopted {
+        window_id: tab.window_id.clone(),
+        tab_id: tab.id.clone(),
+        terminal_id: tab.terminals[0].id.clone(),
+    };
+    let ctx = PlanCtx {
+        window: &planned_window,
+        layout: &spin.layout,
+        title: &spin.name,
+        session_cwd: &spin.session_cwd,
+        session_name: &spin.name,
+    };
+    let ops = plan(&ctx)?;
+    // A failed adopt never closes the user's tab (`execute` only rolls back
+    // tabs the plan created); whatever splits were made are left in place.
+    let created = execute(&ops, ghostty)?;
+    register_session(&spin, &created, store)
 }
 
 struct Created {
@@ -292,16 +384,20 @@ struct Created {
     terminals: Vec<String>,
 }
 
-/// Fold ops over the bridge. Any failure rolls the half-built tab back —
-/// spin-up is all-or-nothing.
+/// Fold ops over the bridge. A failure mid-way rolls the half-built tab
+/// back when the plan created it (spin-up is all-or-nothing); an adopted
+/// tab is the user's own and is never closed.
 fn execute(ops: &[Op], ghostty: &dyn GhosttyBridge) -> Result<Created> {
+    let owns_tab = matches!(ops.first(), Some(Op::NewWindow { .. } | Op::NewTab { .. }));
     let mut panes: std::collections::HashMap<PaneRef, String> = std::collections::HashMap::new();
     let mut created: Option<Created> = None;
     match run_ops(ops, ghostty, &mut panes, &mut created) {
         Ok(()) => created.ok_or_else(|| Error::Message("plan created no tab".into())),
         Err(e) => {
-            if let Some(c) = created {
-                let _ = ghostty.close_tab(&c.window_id, &c.tab_id);
+            if owns_tab {
+                if let Some(c) = created {
+                    let _ = ghostty.close_tab(&c.window_id, &c.tab_id);
+                }
             }
             Err(e)
         }
@@ -332,6 +428,14 @@ fn run_ops(
                     window_id: c.window_id,
                     tab_id: c.tab_id,
                     terminals: vec![c.terminal_id],
+                });
+            }
+            Op::Adopt { window_id, tab_id, terminal_id } => {
+                panes.insert(PaneRef::Root, terminal_id.clone());
+                *created = Some(Created {
+                    window_id: window_id.clone(),
+                    tab_id: tab_id.clone(),
+                    terminals: vec![terminal_id.clone()],
                 });
             }
             Op::Split { target, dir, cfg, into } => {
@@ -443,7 +547,7 @@ fn sanitize_name(name: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ghostty::fake::FakeBridge;
+    use crate::ghostty::fake::{FakeBridge, FakeTerminal};
 
     fn leaf(run: Option<&str>) -> Panel {
         Panel::leaf(run.map(str::to_string))
@@ -504,6 +608,7 @@ mod tests {
             .map(|op| match op {
                 Op::NewWindow { .. } => "new_window".into(),
                 Op::NewTab { .. } => "new_tab".into(),
+                Op::Adopt { terminal_id, .. } => format!("adopt {terminal_id}"),
                 Op::Split { target, dir, into, .. } => format!("split {target:?} {} {into:?}", dir.ghostty()),
                 Op::Equalize { .. } => "equalize".into(),
                 Op::SetTitle { .. } => "title".into(),
@@ -524,6 +629,27 @@ mod tests {
                 "run Child(1) lazygit",
             ]
         );
+    }
+
+    #[test]
+    fn adopted_window_seeds_root_without_creation() {
+        let layout = Layout {
+            direction: Direction::Vertical,
+            panels: vec![leaf(Some("a")), leaf(Some("b"))],
+        };
+        let window = PlannedWindow::Adopted {
+            window_id: "w1".into(),
+            tab_id: "t1".into(),
+            terminal_id: "term1".into(),
+        };
+        let ops = plan(&ctx(&window, &layout)).unwrap();
+        assert_eq!(
+            ops[0],
+            Op::Adopt { window_id: "w1".into(), tab_id: "t1".into(), terminal_id: "term1".into() }
+        );
+        // The existing shell hosts the first panel; splits come off of it.
+        assert!(matches!(ops[1], Op::Split { target: PaneRef::Root, .. }));
+        assert!(ops.iter().all(|op| !matches!(op, Op::NewWindow { .. } | Op::NewTab { .. })));
     }
 
     #[test]
@@ -726,6 +852,89 @@ workflows:
         r.workflow = Some("x".into());
         assert!(matches!(up(&r, &store, &bridge), Err(Error::UnresolvedVar(_))));
         assert!(bridge.cfgs.borrow().is_empty()); // nothing created
+    }
+
+    // ---- adopt ----
+
+    #[test]
+    fn adopt_uses_current_tab_as_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = StateStore::open_memory().unwrap();
+        // front window w-100, selected tab t-100, shell terminal term-100
+        let bridge = FakeBridge::with_window();
+        let mut r = req(dir.path());
+        r.commands = vec!["vim".into(), "lazygit".into()];
+
+        let row = adopt(&r, &store, &bridge).unwrap();
+        assert_eq!(row.window_id, "w-100");
+        assert_eq!(row.tab_id, "t-100");
+        assert_eq!(row.terminals[0], "term-100"); // existing shell is the root pane
+        assert_eq!(row.terminals.len(), 2);
+        // vim is typed into the existing shell, lazygit into the new split,
+        // and the adopted tab gets the session title.
+        let log = bridge.log.borrow();
+        assert!(log.iter().any(|l| l == "input:term-100:vim"));
+        assert!(log.iter().any(|l| l == &format!("input:{}:lazygit", row.terminals[1])));
+        assert!(log.iter().any(|l| l == &format!("action:term-100:set_tab_title:{}", row.name)));
+        // only the split received a creation cfg — the root shell pre-existed
+        assert_eq!(bridge.cfgs.borrow().len(), 1);
+    }
+
+    #[test]
+    fn adopt_rejects_multi_pane_and_managed_tabs() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let store = StateStore::open_memory().unwrap();
+        let bridge = FakeBridge::with_window();
+        bridge.windows.borrow_mut()[0].tabs[0]
+            .terminals
+            .push(FakeTerminal { id: "term-101".into(), cwd: "/".into() });
+        let err = adopt(&req(dir.path()), &store, &bridge).unwrap_err();
+        assert!(matches!(err, Error::Message(m) if m.contains("single-pane")));
+
+        let store = StateStore::open_memory().unwrap();
+        let bridge = FakeBridge::with_window();
+        store
+            .register(&NewSession {
+                name: "taken",
+                window_id: "w-100",
+                tab_id: "t-100",
+                workflow: None,
+                cwd: None,
+                params: "{}",
+                terminals: &["term-100".to_string()],
+                labels: &BTreeMap::new(),
+            })
+            .unwrap();
+        let err = adopt(&req(dir.path()), &store, &bridge).unwrap_err();
+        assert!(matches!(err, Error::Message(m) if m.contains("'taken'")));
+    }
+
+    #[test]
+    fn adopt_requires_a_running_ghostty_with_a_tab() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = StateStore::open_memory().unwrap();
+        let bridge = FakeBridge::default(); // not running, no windows
+        let err = adopt(&req(dir.path()), &store, &bridge).unwrap_err();
+        assert!(matches!(err, Error::Ghostty(_)));
+        assert!(bridge.log.borrow().is_empty());
+    }
+
+    #[test]
+    fn adopt_aborts_on_unresolved_var_before_mutation() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(config::PROJECT_CONFIG_NAME),
+            "workflows:\n  x:\n    name: fixed\n    layout:\n      direction: vertical\n      panels:\n        - run: \"echo ${nope}\"\n",
+        )
+        .unwrap();
+        let store = StateStore::open_memory().unwrap();
+        let bridge = FakeBridge::with_window();
+        let mut r = req(dir.path());
+        r.workflow = Some("x".into());
+        assert!(matches!(adopt(&r, &store, &bridge), Err(Error::UnresolvedVar(_))));
+        assert!(bridge.cfgs.borrow().is_empty());
+        assert!(bridge.log.borrow().is_empty()); // user's tab untouched
     }
 
     #[test]

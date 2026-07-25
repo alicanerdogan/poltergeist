@@ -76,6 +76,29 @@ gtb up [workflow] [--name N] [--cwd DIR] [--direction vertical|horizontal]
 7. Focus the active panel, if any (§4.2 `active`).
 8. Register the session in the registry; print the result.
 
+**Variant: `gtb adopt`.**
+
+```
+gtb adopt [workflow] [--name N] [--cwd DIR] [--direction vertical|horizontal]
+          [--label k=v]... [--pre CMD] [--param k=v]... [--json] [--] [CMD ...]
+```
+
+Like `up`, but instead of creating a tab it **adopts the current tab** — the selected
+tab of the front Ghostty window — and applies the layout to it. All `up` flags apply
+except `--window`. Guards, checked before any mutation:
+
+- Ghostty is running with a current tab.
+- The tab has exactly **one pane** (adopt can't guess which split is the main one).
+- The tab is not already managed by a session (checked after reconciliation).
+
+The tab's existing terminal becomes the root pane: the first panel's `run` is typed
+into that shell, remaining panels split off of it, splits are equalized, and the tab
+title is set. Lifecycle steps 1–4 and 8 are identical to `up`; steps 5–7 differ in
+that nothing is created for the root. Two consequences of the root shell pre-existing:
+its cwd and environment are untouched (no `GEIST_SESSION` there), and a mid-spin
+failure cannot roll the tab back — the user's tab is never closed, though partial
+splits may remain.
+
 ### 2.2 `gtb ls`
 
 ```

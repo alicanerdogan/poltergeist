@@ -23,6 +23,8 @@ struct Cli {
 enum Cmd {
     /// Spin up a session — ad-hoc from flags, or from a named workflow
     Up(UpArgs),
+    /// Adopt the current tab as a session and apply the layout to it
+    Adopt(AdoptArgs),
     /// List live managed sessions
     Ls(LsArgs),
     /// Make a session's tab active (interactive picker when no name is given)
@@ -31,8 +33,9 @@ enum Cmd {
     Kill(KillArgs),
 }
 
+/// Flags shared by `up` and `adopt`.
 #[derive(Args)]
-struct UpArgs {
+struct SpinArgs {
     /// Workflow name from config (project-local first, then global)
     workflow: Option<String>,
     /// Session name (default: workflow name, else basename of cwd)
@@ -47,21 +50,51 @@ struct UpArgs {
     /// Attach a label to the session (repeatable)
     #[arg(long = "label", value_parser = parse_kv)]
     labels: Vec<(String, String)>,
-    /// Window placement: front | new | <ghostty-window-id>
-    #[arg(long)]
-    window: Option<WindowTarget>,
     /// Pre-spin-up hook command (same contract as workflow hooks)
     #[arg(long)]
     pre: Option<String>,
     /// Supply a workflow param (repeatable; workflow mode only)
     #[arg(long = "param", value_parser = parse_kv)]
     params: Vec<(String, String)>,
-    /// Print the created session's full record as JSON
+    /// Print the session's full record as JSON
     #[arg(long)]
     json: bool,
     /// Ad-hoc panel commands, one panel per command (after --)
     #[arg(last = true)]
     commands: Vec<String>,
+}
+
+impl SpinArgs {
+    fn into_request(self, window: Option<WindowTarget>, invocation_cwd: PathBuf, home: PathBuf) -> session::UpRequest {
+        session::UpRequest {
+            workflow: self.workflow,
+            name: self.name,
+            cwd: self.cwd,
+            direction: self.direction,
+            labels: self.labels,
+            window,
+            pre: self.pre,
+            params: self.params,
+            commands: self.commands,
+            invocation_cwd,
+            home,
+        }
+    }
+}
+
+#[derive(Args)]
+struct UpArgs {
+    #[command(flatten)]
+    spin: SpinArgs,
+    /// Window placement: front | new | <ghostty-window-id>
+    #[arg(long)]
+    window: Option<WindowTarget>,
+}
+
+#[derive(Args)]
+struct AdoptArgs {
+    #[command(flatten)]
+    spin: SpinArgs,
 }
 
 #[derive(Args)]
@@ -119,6 +152,7 @@ fn dispatch(cli: Cli) -> Result<()> {
     let bridge = OsascriptBridge::new();
     match cli.cmd {
         Cmd::Up(args) => cmd_up(args, &store, &bridge, invocation_cwd, home),
+        Cmd::Adopt(args) => cmd_adopt(args, &store, &bridge, invocation_cwd, home),
         Cmd::Ls(args) => cmd_ls(args, &store, &bridge),
         Cmd::Switch(args) => cmd_switch(args, &store, &bridge),
         Cmd::Kill(args) => cmd_kill(args, &store, &bridge),
@@ -130,6 +164,22 @@ fn reconcile_first(store: &StateStore, bridge: &dyn GhosttyBridge) -> Result<()>
     Ok(())
 }
 
+/// Cross-flag usage rules shared by `up` and `adopt` (spec §2.1).
+fn validate_spin(spin: &SpinArgs) -> Result<()> {
+    if spin.workflow.is_some() && !spin.commands.is_empty() {
+        return Err(Error::Usage(
+            "cannot combine a workflow with panel commands (after `--`)".into(),
+        ));
+    }
+    if spin.workflow.is_none() && !spin.params.is_empty() {
+        return Err(Error::Usage("--param only applies to workflow spins".into()));
+    }
+    if spin.workflow.is_some() && spin.direction.is_some() {
+        return Err(Error::Usage("--direction only applies to ad-hoc spins".into()));
+    }
+    Ok(())
+}
+
 fn cmd_up(
     args: UpArgs,
     store: &StateStore,
@@ -137,37 +187,25 @@ fn cmd_up(
     invocation_cwd: PathBuf,
     home: PathBuf,
 ) -> Result<()> {
-    // Cross-flag usage rules (spec §2.1).
-    if args.workflow.is_some() && !args.commands.is_empty() {
-        return Err(Error::Usage(
-            "cannot combine a workflow with panel commands (after `--`)".into(),
-        ));
-    }
-    if args.workflow.is_none() && !args.params.is_empty() {
-        return Err(Error::Usage("--param only applies to workflow spins".into()));
-    }
-    if args.workflow.is_some() && args.direction.is_some() {
-        return Err(Error::Usage("--direction only applies to ad-hoc spins".into()));
-    }
+    validate_spin(&args.spin)?;
+    let json = args.spin.json;
+    let req = args.spin.into_request(args.window, invocation_cwd, home);
+    let row = session::up(&req, store, bridge)?;
+    output::print_up(&row, json, "created")
+}
 
-    let row = session::up(
-        &session::UpRequest {
-            workflow: args.workflow,
-            name: args.name,
-            cwd: args.cwd,
-            direction: args.direction,
-            labels: args.labels,
-            window: args.window,
-            pre: args.pre,
-            params: args.params,
-            commands: args.commands,
-            invocation_cwd,
-            home,
-        },
-        store,
-        bridge,
-    )?;
-    output::print_up(&row, args.json)
+fn cmd_adopt(
+    args: AdoptArgs,
+    store: &StateStore,
+    bridge: &dyn GhosttyBridge,
+    invocation_cwd: PathBuf,
+    home: PathBuf,
+) -> Result<()> {
+    validate_spin(&args.spin)?;
+    let json = args.spin.json;
+    let req = args.spin.into_request(None, invocation_cwd, home);
+    let row = session::adopt(&req, store, bridge)?;
+    output::print_up(&row, json, "adopted")
 }
 
 fn cmd_ls(args: LsArgs, store: &StateStore, bridge: &dyn GhosttyBridge) -> Result<()> {
@@ -215,11 +253,25 @@ mod tests {
         let cli = Cli::try_parse_from(["geist", "up", "--", "vim", "lazygit"]).unwrap();
         match cli.cmd {
             Cmd::Up(args) => {
-                assert_eq!(args.workflow, None);
-                assert_eq!(args.commands, vec!["vim", "lazygit"]);
+                assert_eq!(args.spin.workflow, None);
+                assert_eq!(args.spin.commands, vec!["vim", "lazygit"]);
             }
             _ => panic!("expected up"),
         }
+    }
+
+    #[test]
+    fn parses_adopt_and_rejects_window_flag() {
+        let cli = Cli::try_parse_from(["geist", "adopt", "--name", "dev", "--", "vim"]).unwrap();
+        match cli.cmd {
+            Cmd::Adopt(args) => {
+                assert_eq!(args.spin.name.as_deref(), Some("dev"));
+                assert_eq!(args.spin.commands, vec!["vim"]);
+            }
+            _ => panic!("expected adopt"),
+        }
+        // --window is `up`-only: adopt always targets the current tab.
+        assert!(Cli::try_parse_from(["geist", "adopt", "--window", "new"]).is_err());
     }
 
     #[test]
@@ -234,11 +286,11 @@ mod tests {
         .unwrap();
         match cli.cmd {
             Cmd::Up(args) => {
-                assert_eq!(args.workflow.as_deref(), Some("review"));
-                assert_eq!(args.params, vec![("branch".to_string(), "feat".to_string())]);
-                assert_eq!(args.labels, vec![("role".to_string(), "review".to_string())]);
+                assert_eq!(args.spin.workflow.as_deref(), Some("review"));
+                assert_eq!(args.spin.params, vec![("branch".to_string(), "feat".to_string())]);
+                assert_eq!(args.spin.labels, vec![("role".to_string(), "review".to_string())]);
                 assert_eq!(args.window, Some(WindowTarget::New));
-                assert!(args.json);
+                assert!(args.spin.json);
             }
             _ => panic!("expected up"),
         }
@@ -254,7 +306,7 @@ mod tests {
     fn direction_value_enum() {
         let cli = Cli::try_parse_from(["geist", "up", "--direction", "horizontal", "--", "top"]).unwrap();
         match cli.cmd {
-            Cmd::Up(args) => assert_eq!(args.direction, Some(Direction::Horizontal)),
+            Cmd::Up(args) => assert_eq!(args.spin.direction, Some(Direction::Horizontal)),
             _ => panic!("expected up"),
         }
         assert!(Cli::try_parse_from(["geist", "up", "--direction", "sideways"]).is_err());

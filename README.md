@@ -58,6 +58,31 @@ shell — the pane survives.
 Spin-up is all-or-nothing: params, hooks, and `${var}` interpolation are
 resolved *before* any Ghostty mutation, and a failure rolls the tab back.
 
+### `geist adopt` — turn the current tab into a session
+
+Like `up`, but instead of creating a tab it adopts the tab you're sitting
+in — the selected tab of the front Ghostty window — and applies the layout
+to it:
+
+```sh
+geist adopt --name dev -- vim . lazygit   # vim typed here, splits for the rest
+geist adopt review --param branch=feat/login
+geist adopt                               # just register this tab as a session
+```
+
+The tab's existing shell becomes the first panel: its panel's `run` command
+is typed into that shell, and the remaining panels split off of it. The tab
+gets the session title and is registered, so `ls`/`switch`/`kill` work on it
+like any other session.
+
+All of `up`'s flags apply except `--window` (the target is always the
+current tab). Three guards: Ghostty must be running with a current tab, the
+tab must have a **single pane** (adopt can't guess which split is the main
+one), and the tab must not already be managed. Two caveats follow from the
+root shell pre-existing: it keeps its own cwd and environment (no
+`GEIST_SESSION` there), and a mid-spin failure can't roll the tab back —
+your tab is never closed, though partial splits may remain.
+
 ### `geist ls` — list sessions
 
 ```sh

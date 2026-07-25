@@ -37,14 +37,15 @@ fn to_json(row: &SessionRow, selected: Option<bool>) -> Result<SessionJson<'_>> 
     })
 }
 
-/// `geist up` result: the created session's full record with `--json`
-/// (spec §6.2 — `selected` omitted), else a one-line confirmation.
-pub fn print_up(row: &SessionRow, json: bool) -> Result<()> {
+/// `geist up` / `geist adopt` result: the session's full record with
+/// `--json` (spec §6.2 — `selected` omitted), else a one-line confirmation
+/// (`verb` is "created" or "adopted").
+pub fn print_up(row: &SessionRow, json: bool, verb: &str) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(&to_json(row, None)?)?);
     } else {
         let n = row.terminals.len();
-        println!("created session '{}' ({} panel{})", row.name, n, if n == 1 { "" } else { "s" });
+        println!("{verb} session '{}' ({} panel{})", row.name, n, if n == 1 { "" } else { "s" });
     }
     Ok(())
 }
